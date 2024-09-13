@@ -7,6 +7,42 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <vector>
+
+std::vector<std::string> split(const std::string& str, std::string delimiters)
+{
+  std::cout << "Tokenizing: '" << str << "'...\n\n";
+
+  std::vector<std::string> tokens;
+
+  size_t start = 0;
+  size_t end = str.find_first_of(delimiters);
+
+  std::cout << start << " " << end << " " << str.length() << "\n";
+
+  while(end != std::string::npos) 
+  {
+    if(start != end)
+    {
+      std::string sub = str.substr(start, end - start);
+      std::cout << "Token - " << sub << "\n";
+      tokens.push_back(sub);
+    }
+    start = end+1;
+    end = str.find_first_of(delimiters, start);
+  }
+
+  if(start < str.length())
+  {
+    std::string sub = str.substr(start);
+    std::cout << "Tokenized: " << sub << "\n";
+    tokens.push_back(sub);
+  }
+
+  std::cout << "Tokenization Complete.\n\n";
+
+  return tokens;
+}
 
 int main(int argc, char **argv) {
   // Flush after every std::cout / std::cerr
@@ -50,6 +86,8 @@ int main(int argc, char **argv) {
   
   struct sockaddr_in client_addr;
   int client_addr_len = sizeof(client_addr);
+
+  //-------Clinet:
   
   std::cout << "Waiting for a client to connect...\n";
   
@@ -62,14 +100,37 @@ int main(int argc, char **argv) {
   }
   
   std::cout << "Client connected\n";
-
-  std::string message = "+PONG\r\n";
-  if(send(client_fd, message.c_str(), message.size(), 0) < 0) 
+  
+  char buffer[1024] = {0};
+  if(read(client_fd, buffer, sizeof(buffer)) < 0)
   {
-    std::cerr << "send(): falied to send message\n";
+    std::cerr << "Failed to read message from client\n";
     return 1;
   }
-  
+
+  std::cout << "Messaged received from client: " << buffer << std::endl;
+
+  std::string delimiters = " ,\n";
+
+  std::vector<std::string> tokens = split(buffer, delimiters);
+
+  std::string ping_msg = "PING";
+
+  for(std::string token : tokens)
+  { 
+    std::cout << ((std::string(token) == ping_msg) ? "Accpeted: " : "Rejected: ") << token << std::endl;
+    if(std::string(token) == ping_msg)
+    {
+      std::string pong_msg = "+PONG\r\n";
+      if(send(client_fd, pong_msg.c_str(), pong_msg.size(), 0) < 0) 
+      {
+        std::cerr << "send(): falied to send message\n";
+        return 1;
+      }
+      std::cout << "Sent 'PONG' to client.\n\n";
+    }
+  }
+
   close(client_fd);
   close(server_fd);
 
