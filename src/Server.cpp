@@ -128,6 +128,10 @@ int main(int argc, char **argv) {
         return 1;
       }
       std::cout << "Sent 'PONG' to client.\n\n";
+    } 
+    else 
+    {
+      std::cout << std::endl;
     }
   }
 
