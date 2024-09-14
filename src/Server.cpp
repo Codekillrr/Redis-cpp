@@ -8,24 +8,56 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <vector>
+#include <future>
+#include <chrono>
+#include <thread>
+#include <mutex>
 
-std::vector<std::string> split(const std::string& str, std::string delimiters)
+const std::string ping_msg = "PING";
+
+std::mutex coutMutex, cerrMutex;
+
+// void threadLog(const std::string log) 
+// {
+//   std::lock_guard<std::mutex> lock(coutMutex);
+//   std::cout << log << std::endl;
+// }
+
+// void threadErr(const std::string err) 
+// {
+//   std::lock_guard<std::mutex> lock(cerrMutex);
+//   std::cerr << err << std::endl;
+// }
+
+std::vector<std::string> split(const std::string& str, std::string delimiters, int client_fd)
 {
-  std::cout << "Tokenizing: '" << str << "'...\n\n";
+  {//Mutex Locking
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << client_fd << "  Tokenizing: '" << str << "'...\n\n";
+  }
+
 
   std::vector<std::string> tokens;
 
   size_t start = 0;
   size_t end = str.find_first_of(delimiters);
 
-  std::cout << start << " " << end << " " << str.length() << "\n";
+    {//Mutex Locking
+      std::lock_guard<std::mutex> lock(coutMutex);
+      std::cout << client_fd << "  " << start << " " << end << " " << str.length() << "\n";
+    }
 
   while(end != std::string::npos) 
   {
     if(start != end)
     {
       std::string sub = str.substr(start, end - start);
-      std::cout << "Token - " << sub << "\n";
+
+        {//Mutex Locking
+          std::lock_guard<std::mutex> lock(coutMutex);
+          std::cout << client_fd << "  Token - " << sub << "\n";
+        }
+
       tokens.push_back(sub);
     }
     start = end+1;
@@ -35,13 +67,91 @@ std::vector<std::string> split(const std::string& str, std::string delimiters)
   if(start < str.length())
   {
     std::string sub = str.substr(start);
-    std::cout << "Tokenized: " << sub << "\n";
+
+    {//Mutex Locking
+      std::lock_guard<std::mutex> lock(coutMutex);
+      std::cout << client_fd << "  Token - " << sub << "\n";
+    }
+
     tokens.push_back(sub);
   }
 
-  std::cout << "Tokenization Complete.\n\n";
+  {//Mutex Locking
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << client_fd << "  Tokenization Complete.\n\n";
+  }
 
   return tokens;
+}
+
+void processTokens(std::vector<std::string> &tokens, int client_fd) 
+{
+  {//Mutex Locking
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << client_fd << "  Processing... " << std::endl;
+  }
+
+  for(std::string token : tokens)
+  { 
+    bool requestStatus = std::string(token) == ping_msg;
+
+    {//Mutex Locking
+      std::lock_guard<std::mutex> lock(coutMutex);
+      std::cout << client_fd << (requestStatus ? "  Accpeted: " : "  Rejected: ") << token << std::endl;
+    }
+
+    if(requestStatus)
+    {
+      std::this_thread::sleep_for(std::chrono::seconds(5)); // sleep for 5 secs
+      std::string pong_msg = "+PONG\r\n";
+      if(send(client_fd, pong_msg.c_str(), pong_msg.size(), 0) < 0) 
+      {
+        std::lock_guard<std::mutex> lock(cerrMutex);
+        std::cerr << client_fd << "  send(): falied to send message\n";
+        return;
+      }
+
+      {//Mutex Locking
+        std::lock_guard<std::mutex> lock(coutMutex);
+        std::cout << client_fd << "  Sent 'PONG' to client.\n\n";
+      }
+
+    } else {
+      std::lock_guard<std::mutex> lock(coutMutex);
+      std::cout << std::endl;
+    }
+  }
+}
+
+void handleClient(int client_fd) 
+{
+  char buffer[1024] = {0};
+  if(read(client_fd, buffer, sizeof(buffer)) < 0)
+  {
+    std::lock_guard<std::mutex> lock(cerrMutex);
+    std::cerr << client_fd << "  Failed to read message from client\n";
+    return;
+  }
+
+  {//Mutex Locking
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << client_fd << "  Messaged received from client: " << buffer << std::endl;
+  }
+
+
+  std::string delimiters = " ,\n";
+
+  std::vector<std::string> tokens = split(buffer, delimiters, client_fd);
+
+  processTokens(tokens, client_fd);
+
+  close(client_fd);
+
+  {//Mutex Locking
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << "Client: " << client_fd << " Closed.\n";
+  }
+
 }
 
 int main(int argc, char **argv) {
@@ -89,53 +199,29 @@ int main(int argc, char **argv) {
 
   //-------Clinet:
   
-  std::cout << "Waiting for a client to connect...\n";
-  
-  int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
+  std::cout << "Waiting for a clients to connect...\n";
 
-  if (client_fd < 0) 
+  std::vector< std::future<void> > c_Futures;
+
+  while(true)
   {
-    std::cout << "Failed to accept connection\n";
-    return 1;
-  }
-  
-  std::cout << "Client connected\n";
-  
-  char buffer[1024] = {0};
-  if(read(client_fd, buffer, sizeof(buffer)) < 0)
-  {
-    std::cerr << "Failed to read message from client\n";
-    return 1;
-  }
+    int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
 
-  std::cout << "Messaged received from client: " << buffer << std::endl;
-
-  std::string delimiters = " ,\n";
-
-  std::vector<std::string> tokens = split(buffer, delimiters);
-
-  std::string ping_msg = "PING";
-
-  for(std::string token : tokens)
-  { 
-    std::cout << ((std::string(token) == ping_msg) ? "Accpeted: " : "Rejected: ") << token << std::endl;
-    if(std::string(token) == ping_msg)
+    if (client_fd < 0) 
     {
-      std::string pong_msg = "+PONG\r\n";
-      if(send(client_fd, pong_msg.c_str(), pong_msg.size(), 0) < 0) 
-      {
-        std::cerr << "send(): falied to send message\n";
-        return 1;
-      }
-      std::cout << "Sent 'PONG' to client.\n\n";
-    } 
-    else 
-    {
-      std::cout << std::endl;
+      std::lock_guard<std::mutex> lock(cerrMutex);
+      std::cerr << "Failed to accept connection\n";
+      return 1;
     }
+
+    {//Mutex Locking
+      std::lock_guard<std::mutex> lock(coutMutex);
+      std::cout << "Client connected: " << client_fd << std::endl;
+    }
+
+    c_Futures.push_back(std::async(std::launch::async, handleClient, client_fd));
   }
 
-  close(client_fd);
   close(server_fd);
 
   return 0;
