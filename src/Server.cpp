@@ -36,7 +36,6 @@ std::vector<std::string> split(const std::string& str, std::string delimiters, i
     std::cout << client_fd << "  Tokenizing: '" << str << "'...\n\n";
   }
 
-
   std::vector<std::string> tokens;
 
   size_t start = 0;
@@ -139,7 +138,7 @@ void handleClient(int client_fd)
   }
 
 
-  std::string delimiters = " ,\n";
+  std::string delimiters = " ,\r\n";
 
   std::vector<std::string> tokens = split(buffer, delimiters, client_fd);
 
